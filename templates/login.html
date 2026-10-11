@@ -159,20 +159,23 @@
     <div class="card">
         <div class="logo">✦</div>
         <h2>Analysis AI</h2>
-        <p class="subtitle">Secure Private Email Authentication</p>
+        <p class="subtitle">Sign in with your username</p>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="POST" action="/login">
-            <label for="email">Email Address</label>
+            <label for="username">Username</label>
             <div class="input-wrap">
-                <input type="email" id="email" name="email" placeholder="you@yourdomain.com" required autofocus>
+                <input type="text" id="username" name="username" placeholder="yourname" required autofocus>
             </div>
-            <label for="password">App Password</label>
+            <label for="password">Password</label>
             <div class="input-wrap">
                 <input type="password" id="password" name="password" required>
                 <button type="button" class="toggle-pw" onclick="togglePassword()">Show</button>
             </div>
             <button type="submit">Sign In</button>
         </form>
+        <p style="text-align:center; margin-top:18px; font-size:0.9rem; color:var(--muted);">
+            New here? <a href="/register" style="color:#60a5fa;">Create account</a>
+        </p>
     </div>
     <script>
         function togglePassword() {

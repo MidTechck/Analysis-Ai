@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Create Account - Analysis AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --bg: #05070a;
+            --card: #111418;
+            --border: #1e242c;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        .bg-rings {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ring-group {
+            position: relative;
+            width: 480px;
+            height: 480px;
+        }
+        .ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 1px solid;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0.35;
+        }
+        .ring:nth-child(1) {
+            width: 260px; height: 260px;
+            border-color: rgba(129, 140, 248, 0.5);
+            box-shadow: 0 0 20px rgba(129, 140, 248, 0.15);
+            animation: pulse 4s ease-in-out infinite;
+        }
+        .ring:nth-child(2) {
+            width: 340px; height: 340px;
+            border-color: rgba(203, 213, 225, 0.3);
+            animation: pulse 5s ease-in-out infinite reverse;
+        }
+        .ring:nth-child(3) {
+            width: 420px; height: 420px;
+            border-color: rgba(148, 163, 184, 0.2);
+            animation: pulse 6s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.25; transform: translate(-50%, -50%) scale(0.96); }
+            50% { opacity: 0.5; transform: translate(-50%, -50%) scale(1.02); }
+        }
+        .card {
+            background: rgba(17, 20, 24, 0.82);
+            backdrop-filter: blur(16px);
+            border-radius: 16px;
+            padding: 36px 32px;
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.55);
+            width: 100%;
+            max-width: 400px;
+            position: relative;
+            z-index: 2;
+            animation: card-in 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes card-in {
+            from { opacity: 0; transform: translateY(20px) scale(0.97); }
+            to { opacity: 1; transform: none; }
+        }
+        .logo {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 16px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(129,140,248,0.25), transparent 70%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            color: #c7d2fe;
+        }
+        h2 { margin: 0 0 6px 0; font-weight: 600; font-size: 1.5rem; letter-spacing: -0.02em; text-align: center; }
+        p.subtitle { color: var(--muted); font-size: 0.9rem; margin: 0 0 28px 0; text-align: center; }
+        label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+        .input-wrap { position: relative; margin-bottom: 18px; }
+        input {
+            background: #0a0c10;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 1rem;
+            width: 100%;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+        .toggle-pw {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 4px 6px;
+        }
+        .toggle-pw:hover { color: var(--text); }
+        button[type="submit"] {
+            background: var(--accent);
+            color: white;
+            padding: 13px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+        button[type="submit"]:hover { background: var(--accent-hover); }
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+        }
+        a { color: #60a5fa; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-rings">
+        <div class="ring-group">
+            <div class="ring"></div>
+            <div class="ring"></div>
+            <div class="ring"></div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="logo">✦</div>
+        <h2>Create Account</h2>
+        <p class="subtitle">Choose a username and connect your email</p>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="POST" action="/register">
+            <label for="username">Username</label>
+            <div class="input-wrap">
+                <input type="text" id="username" name="username" placeholder="yourname" required autofocus>
+            </div>
+            <label for="email">Email Address</label>
+            <div class="input-wrap">
+                <input type="email" id="email" name="email" placeholder="you@yourdomain.com" required>
+            </div>
+            <label for="password">Email Password</label>
+            <div class="input-wrap">
+                <input type="password" id="password" name="password" required>
+                <button type="button" class="toggle-pw" onclick="togglePassword()">Show</button>
+            </div>
+            <button type="submit">Create Account</button>
+        </form>
+        <p style="text-align:center; margin-top:18px; font-size:0.9rem; color:var(--muted);">
+            Already have an account? <a href="/">Sign in</a>
+        </p>
+    </div>
+    <script>
+        function togglePassword() {
+            const pw = document.getElementById('password');
+            const btn = document.querySelector('.toggle-pw');
+            if (pw.type === 'password') {
+                pw.type = 'text';
+                btn.textContent = 'Hide';
+            } else {
+                pw.type = 'password';
+                btn.textContent = 'Show';
+            }
+        }
+    </script>
+</body>
+</html>

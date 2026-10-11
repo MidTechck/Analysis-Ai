@@ -157,13 +157,28 @@ print("SYSTEM BOOT DIAGNOSTICS & MULTI-PROVIDER LLM:")
 discover_providers()
 print("="*50 + "\n")
 
-# --- PERMANENT MEMORY ENGINE ---
-def get_memory_file(email_acc):
-    safe_email = email_acc.replace('@', '_').replace('.', '_')
-    return f"memory_{safe_email}.json"
+# --- USER STORE (username isolates all data) ---
+USERS_FILE = "users.json"
 
-def load_memory(email_acc):
-    file = get_memory_file(email_acc)
+def load_users():
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_users(users):
+    with open(USERS_FILE, 'w') as f:
+        json.dump(users, f, indent=2)
+
+def get_memory_file(username):
+    safe = username.replace('@', '_').replace('.', '_').replace(' ', '_')
+    return f"memory_{safe}.json"
+
+def load_memory(username):
+    file = get_memory_file(username)
     if os.path.exists(file):
         try:
             with open(file, 'r') as f:
@@ -172,8 +187,8 @@ def load_memory(email_acc):
             return []
     return []
 
-def save_memory(email_acc, history):
-    file = get_memory_file(email_acc)
+def save_memory(username, history):
+    file = get_memory_file(username)
     with open(file, 'w') as f:
         json.dump(history, f)
 
@@ -345,22 +360,54 @@ def process_agentic_chat(user_message, history, email_acc, password):
 # --- ROUTES ---
 @app.route('/', methods=['GET'])
 def index():
-    if 'email' in session: return redirect(url_for('dashboard'))
+    if 'username' in session: return redirect(url_for('dashboard'))
     return render_template('login.html')
 
-@app.route('/login', methods=['POST'])
-def login():
-    email_acc = request.form['email']
-    password = request.form['password']
-    try:
-        with imap_connection(email_acc, password, select_inbox=False):
-            pass
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        email_acc = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        if not username or not email_acc or not password:
+            return render_template('register.html', error="All fields are required.")
+        users = load_users()
+        if username in users:
+            return render_template('register.html', error="Username already taken.")
+        # Verify IMAP credentials work
+        try:
+            with imap_connection(email_acc, password, select_inbox=False):
+                pass
+        except Exception:
+            return render_template('register.html', error="Could not connect with that email/password.")
+        users[username] = {"email": email_acc, "password": password}
+        save_users(users)
+        session['username'] = username
         session['email'] = email_acc
         session['password'] = password
         session['dashboard_query'] = None
         return redirect(url_for('dashboard'))
+    return render_template('register.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+    users = load_users()
+    user = users.get(username)
+    if not user or user.get('password') != password:
+        return render_template('login.html', error="Invalid username or password.")
+    # Re-verify IMAP still works
+    try:
+        with imap_connection(user['email'], user['password'], select_inbox=False):
+            pass
     except Exception:
-        return render_template('login.html', error="Invalid credentials.")
+        return render_template('login.html', error="Stored email credentials no longer work.")
+    session['username'] = username
+    session['email'] = user['email']
+    session['password'] = user['password']
+    session['dashboard_query'] = None
+    return redirect(url_for('dashboard'))
 
 @app.route('/logout')
 def logout():
@@ -369,7 +416,7 @@ def logout():
 
 @app.route('/dashboard', methods=['GET', 'POST'])
 def dashboard():
-    if 'email' not in session: return redirect(url_for('index'))
+    if 'username' not in session: return redirect(url_for('index'))
     
     total_inbox = 0
     match_count = 0
@@ -442,30 +489,31 @@ def dashboard():
 
 @app.route('/chat', methods=['GET'])
 def chat_page():
-    if 'email' not in session: return redirect(url_for('index'))
+    if 'username' not in session: return redirect(url_for('index'))
     return render_template('chat.html')
 
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
-    if 'email' not in session: return jsonify({"error": "Unauthorized"}), 401
+    if 'username' not in session: return jsonify({"error": "Unauthorized"}), 401
     user_message = request.json.get('message', '')
     if not user_message: return jsonify({"reply": "I didn't catch that."})
     
-    email_acc = session['email']
-    history = load_memory(email_acc)
+    username = session['username']
+    history = load_memory(username)
     
-    reply = process_agentic_chat(user_message, history, email_acc, session['password'])
+    reply = process_agentic_chat(user_message, history, session['email'], session['password'])
     
     history.append({"role": "User", "text": user_message})
     history.append({"role": "Analysis AI", "text": reply})
-    save_memory(email_acc, history[-20:])
+    save_memory(username, history[-20:])
     
     return jsonify({"reply": reply})
 
 @app.route('/api/chat/history', methods=['GET'])
 def get_chat_history():
-    if 'email' not in session: return jsonify([])
-    return jsonify(load_memory(session['email']))
+    if 'username' not in session: return jsonify([])
+    return jsonify(load_memory(session['username']))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
