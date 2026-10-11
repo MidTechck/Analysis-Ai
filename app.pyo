@@ -1,0 +1,319 @@
+from flask import Flask, render_template, request, Response, session, redirect, url_for, jsonify
+import imaplib
+import email
+import email.utils
+from email.header import decode_header
+import re
+import csv
+import io
+import json
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = "sovetlink_admin_secure_key_2026"
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ACTIVE_MODEL = "models/gemini-1.5-flash"  # Verified fast model
+
+# Dynamically construct the API URL
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/{ACTIVE_MODEL}:generateContent?key={GEMINI_API_KEY}"
+
+# --- HELPER FUNCTIONS ---
+
+def extract_body_text(msg):
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() in ["text/plain", "text/html"]:
+                try: return part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                except: pass
+    else:
+        try: return msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+        except: pass
+    return ""
+
+def execute_imap_search(email_acc, password, task_type, target_subject, date_filter):
+    """Standalone IMAP function that can be triggered by the Dashboard or the AI Chatbot."""
+    records = []
+    match_count = 0
+    total_inbox = 0
+    
+    try:
+        mail = imaplib.IMAP4_SSL("mail.privateemail.com")
+        mail.login(email_acc, password)
+        mail.select("inbox")
+
+        _, all_msgs = mail.search(None, 'ALL')
+        total_inbox = len(all_msgs[0].split()) if all_msgs[0] else 0
+
+        if task_type == "client_tally":
+            imap_query = f'(ALL {date_filter})' if date_filter != "NONE" else 'ALL'
+            _, filtered = mail.search(None, imap_query)
+            matching_ids = filtered[0].split() if filtered[0] else []
+            limit = len(matching_ids)
+            unique_clients = set()
+            
+            for e_id in reversed(matching_ids[-limit:]):
+                _, msg_data = mail.fetch(e_id, '(BODY.PEEK[HEADER.FIELDS (TO)])')
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email.message_from_bytes(response_part[1])
+                        raw_to = msg.get("To", "")
+                        if raw_to:
+                            _, clean_to_email = email.utils.parseaddr(raw_to)
+                            if clean_to_email and "@" in clean_to_email:
+                                unique_clients.add(clean_to_email.lower())
+            
+            match_count = len(unique_clients)
+            for client in sorted(unique_clients):
+                records.append({"client_email": client})
+
+        else:
+            imap_query = f'(SUBJECT "{target_subject}" {date_filter})' if date_filter != "NONE" else f'SUBJECT "{target_subject}"'
+            _, filtered = mail.search(None, imap_query)
+            matching_ids = filtered[0].split() if filtered[0] else []
+            match_count = len(matching_ids)
+            limit = len(matching_ids)
+            
+            for e_id in reversed(matching_ids[-limit:]):
+                _, msg_data = mail.fetch(e_id, '(RFC822)')
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email.message_from_bytes(response_part[1])
+                        subject_hdr = decode_header(msg.get("Subject", ""))[0]
+                        subject = subject_hdr[0]
+                        if isinstance(subject, bytes):
+                            subject = subject.decode(subject_hdr[1] if subject_hdr[1] else 'utf-8', errors='ignore')
+
+                        raw_to = msg.get("To", "")
+                        _, clean_to_email = email.utils.parseaddr(raw_to)
+                        
+                        raw_date = msg.get("Date", "")
+                        parsed_date = email.utils.parsedate_to_datetime(raw_date)
+                        clean_date = parsed_date.strftime("%d %b %Y, %H:%M") if parsed_date else raw_date
+
+                        body = extract_body_text(msg)
+                        account_match = re.search(r'(ACC-DF-[\d-]+|INV-DF-[A-Z\d-]+)', body + " " + subject)
+                        account_no = account_match.group(1) if account_match else "Nil"
+
+                        records.append({
+                            "client_email": clean_to_email,
+                            "subject": subject,
+                            "date": clean_date,
+                            "account_no": account_no
+                        })
+        mail.logout()
+        return {"success": True, "total_inbox": total_inbox, "match_count": match_count, "records": records}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def ask_gemini_parser(user_text):
+    prompt = f"""
+    You are an intent router for a data analyst platform. Today is October 9, 2026.
+    Analyze this request: "{user_text}"
+    Determine:
+    1. Task Type: 'client_tally' or 'standard'.
+    2. Subject: Target subject (e.g., 'Order confirmed', 'Payment processed') or 'ALL'.
+    3. Date Filter: 'ON DD-Mon-YYYY' or 'SINCE DD-Mon-YYYY' or 'NONE'.
+    4. AI Message: Brief acknowledgment.
+    Output ONLY raw JSON with keys: "task_type", "subject", "date_filter", "ai_message".
+    """
+    try:
+        response = requests.post(GEMINI_API_URL, headers={'Content-Type': 'application/json'}, json={"contents": [{"parts": [{"text": prompt}]}]})
+        clean_json = response.json()['candidates'][0]['content']['parts'][0]['text'].replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_json)
+    except:
+        return {"task_type": "standard", "subject": user_text, "date_filter": "NONE", "ai_message": "Running standard keyword search."}
+
+def process_agentic_chat(user_message, history, email_acc, password, system_memory):
+    """
+    The autonomous brain. It checks if the user wants an action. If yes, it executes it and formats the result.
+    If no, it responds conversationally using the stored history.
+    """
+    # Build history context
+    chat_context = "\n".join([f"{msg['role']}: {msg['text']}" for msg in history[-6:]]) # Keep last 6 messages
+    
+    # 1. Ask Gemini to classify the chat intent
+    router_prompt = f"""
+    Analyze the user's latest message based on the chat history.
+    Does the user want you to search for, count, or extract email data (orders, clients, payments)?
+    If YES, output ONLY a JSON object: {{"action": "SEARCH", "query": "<the search command>"}}
+    If NO, output ONLY a JSON object: {{"action": "CHAT"}}
+    
+    History:
+    {chat_context}
+    
+    User latest: {user_message}
+    """
+    try:
+        res = requests.post(GEMINI_API_URL, headers={'Content-Type': 'application/json'}, json={"contents": [{"parts": [{"text": router_prompt}]}]})
+        intent = json.loads(res.json()['candidates'][0]['content']['parts'][0]['text'].replace('```json', '').replace('```', '').strip())
+    except:
+        intent = {"action": "CHAT"}
+
+    # 2. Execute Autonomous Action if required
+    if intent.get("action") == "SEARCH":
+        # Run the parser and IMAP query
+        instructions = ask_gemini_parser(intent.get("query", user_message))
+        search_results = execute_imap_search(
+            email_acc, password, 
+            instructions['task_type'], instructions['subject'], instructions['date_filter']
+        )
+        
+        if search_results['success']:
+            count = search_results['match_count']
+            data_context = f"SYSTEM DATA INJECTION: You just ran a search for '{instructions['subject']}'. Found {count} matching records."
+        else:
+            data_context = f"SYSTEM ERROR INJECTION: The search failed due to IMAP error: {search_results['error']}"
+    else:
+        data_context = f"System Dashboard Memory: {system_memory}"
+
+    # 3. Generate final conversational response with the new data
+    final_prompt = f"""
+    You are Analysis AI, managing Midtech Digital's data infrastructure.
+    Use this internal context to answer the user: {data_context}
+    
+    Previous Chat:
+    {chat_context}
+    
+    User: {user_message}
+    Respond sharply and directly. No markdown formatting.
+    """
+    
+    try:
+        final_res = requests.post(GEMINI_API_URL, headers={'Content-Type': 'application/json'}, json={"contents": [{"parts": [{"text": final_prompt}]}]})
+        return final_res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+    except Exception as e:
+        return f"Logic Engine Error: {str(e)}"
+
+# --- ROUTES ---
+
+@app.route('/', methods=['GET'])
+def index():
+    if 'email' in session: return redirect(url_for('dashboard'))
+    return render_template('login.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    email_acc = request.form['email']
+    password = request.form['password']
+    try:
+        # Verify credentials
+        mail = imaplib.IMAP4_SSL("mail.privateemail.com")
+        mail.login(email_acc, password)
+        mail.logout()
+        
+        # Initialize user session
+        session['email'] = email_acc
+        session['password'] = password
+        session['last_action'] = "User logged in."
+        session['chat_history'] = []  # Initialize empty memory block
+        return redirect(url_for('dashboard'))
+    except Exception as e:
+        return render_template('login.html', error="Invalid credentials or connection failed.")
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
+
+@app.route('/dashboard', methods=['GET', 'POST'])
+def dashboard():
+    if 'email' not in session: return redirect(url_for('index'))
+    
+    total_inbox = 0
+    match_count = 0
+    records = []
+    stat_label = "Search Matches"
+    search_term = request.form.get('search_term', '')
+    action = request.form.get('action', 'search')
+    task_type = "standard"
+    ai_message = session.get('last_action', "System ready.")
+
+    if request.method == 'GET':
+        # Just grab the total inbox count for display
+        try:
+            mail = imaplib.IMAP4_SSL("mail.privateemail.com")
+            mail.login(session['email'], session['password'])
+            mail.select("inbox")
+            _, all_msgs = mail.search(None, 'ALL')
+            total_inbox = len(all_msgs[0].split()) if all_msgs[0] else 0
+            mail.logout()
+        except:
+            pass
+
+    if request.method == 'POST' and search_term:
+        ai_instructions = ask_gemini_parser(search_term)
+        task_type = ai_instructions.get("task_type", "standard")
+        target_subject = ai_instructions.get("subject", "ALL")
+        date_filter = ai_instructions.get("date_filter", "NONE")
+        ai_message = ai_instructions.get("ai_message", "Executing command.")
+        
+        # Log action to dashboard memory
+        session['last_action'] = f"Extracted {target_subject} using dashboard interface."
+        session.modified = True
+
+        results = execute_imap_search(session['email'], session['password'], task_type, target_subject, date_filter)
+        
+        if results['success']:
+            total_inbox = results['total_inbox']
+            match_count = results['match_count']
+            records = results['records']
+            stat_label = "Unique Clients Found" if task_type == "client_tally" else f"Matches: {target_subject}"
+
+        if action == "export":
+            output = io.StringIO()
+            writer = csv.writer(output)
+            if task_type == 'client_tally':
+                writer.writerow(['No', 'Unique Client Email', 'Status'])
+                for idx, r in enumerate(records, start=1):
+                    writer.writerow([idx, r['client_email'], 'Verified Client'])
+            else:
+                writer.writerow(['No', 'Client Email', 'Account Number', 'Subject', 'Date'])
+                for idx, r in enumerate(records, start=1):
+                    writer.writerow([idx, r['client_email'], r['account_no'], r['subject'], r['date']])
+                    
+            return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": f"attachment; filename=Analysis_AI_Report.csv"})
+
+    return render_template('dashboard.html', total_inbox=total_inbox, match_count=match_count, records=records, search_term=search_term, task_type=task_type, stat_label=stat_label, ai_message=ai_message)
+
+@app.route('/chat', methods=['GET'])
+def chat_page():
+    if 'email' not in session: return redirect(url_for('index'))
+    return render_template('chat.html')
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    if 'email' not in session: return jsonify({"error": "Unauthorized"}), 401
+    
+    user_message = request.json.get('message', '')
+    if not user_message: return jsonify({"reply": "I didn't catch that."})
+    
+    # Load session history
+    history = session.get('chat_history', [])
+    
+    # Process the interaction via the autonomous agent
+    reply = process_agentic_chat(
+        user_message, 
+        history, 
+        session['email'], 
+        session['password'], 
+        session.get('last_action', 'No dashboard activity.')
+    )
+    
+    # Update memory buffer
+    history.append({"role": "User", "text": user_message})
+    history.append({"role": "Analysis AI", "text": reply})
+    
+    # Prevent session cookie overflow by keeping only the last 10 messages
+    session['chat_history'] = history[-10:]
+    session.modified = True
+    
+    return jsonify({"reply": reply})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Analysis AI - Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --bg: #05070a;
+            --card: #111418;
+            --border: #1e242c;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 24px;
+            background-image: radial-gradient(ellipse at top, rgba(37, 99, 235, 0.05) 0%, transparent 40%);
+        }
+        .container { max-width: 960px; margin: 0 auto; }
+        .header {
+            margin-bottom: 28px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h2 { margin: 0; font-weight: 600; font-size: 1.4rem; letter-spacing: -0.02em; }
+        .session { color: var(--success); font-size: 0.85rem; font-weight: 500; }
+        .logout { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+        .logout:hover { color: var(--text); }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .stat-card h3 {
+            margin: 0 0 8px 0;
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 500;
+        }
+        .stat-card .num {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.02em;
+        }
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            margin-bottom: 24px;
+        }
+        .ai-badge {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; font-weight: 500; }
+        input {
+            background: #0a0c10;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 1rem;
+            width: 100%;
+            margin-bottom: 16px;
+            transition: border-color 0.2s;
+        }
+        input:focus { outline: none; border-color: var(--accent); }
+        .action-row { display: flex; gap: 12px; }
+        button {
+            background: var(--accent);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.95rem;
+            flex: 1;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        button:hover { background: var(--accent-hover); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        button.secondary { background: #1e242c; color: var(--text); }
+        button.secondary:hover { background: #2a323c; }
+        .results-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.9rem; }
+        .results-table th, .results-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+        .results-table th { background: #0a0c10; color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .results-table tr:hover td { background: rgba(255,255,255,0.02); }
+        .badge { background: #065f46; color: white; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
+        .fab {
+            position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px;
+            background: var(--success); color: white; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            text-decoration: none; font-size: 1.4rem;
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
+            transition: transform 0.2s, box-shadow 0.2s; z-index: 1000;
+        }
+        .fab:hover { transform: scale(1.08); }
+
+        .progress-overlay {
+            position: fixed; inset: 0;
+            background: rgba(5, 7, 10, 0.96);
+            backdrop-filter: blur(12px);
+            display: none; align-items: center; justify-content: center;
+            z-index: 2000; flex-direction: column; gap: 32px;
+        }
+        .progress-overlay.active { display: flex; }
+        .anim-box {
+            width: 220px; height: 220px;
+            position: relative;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .stage-label { font-size: 1.1rem; font-weight: 500; color: var(--text); letter-spacing: 0.01em; }
+        .stage-sub { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
+
+        /* Thinking: abstract wireframe particle cluster */
+        .thinking-particles {
+            width: 140px; height: 140px;
+            position: relative;
+        }
+        .thinking-particles .dot {
+            position: absolute;
+            width: 2px; height: 2px;
+            background: #a5b4fc;
+            border-radius: 50%;
+            opacity: 0.7;
+            box-shadow: 0 0 6px #818cf8;
+            animation: particle-float 2.4s ease-in-out infinite;
+        }
+        .thinking-particles .dot:nth-child(1) { top: 20%; left: 30%; animation-delay: 0s; }
+        .thinking-particles .dot:nth-child(2) { top: 35%; left: 65%; animation-delay: 0.3s; }
+        .thinking-particles .dot:nth-child(3) { top: 50%; left: 25%; animation-delay: 0.6s; }
+        .thinking-particles .dot:nth-child(4) { top: 65%; left: 55%; animation-delay: 0.9s; }
+        .thinking-particles .dot:nth-child(5) { top: 40%; left: 45%; animation-delay: 1.2s; }
+        .thinking-particles .dot:nth-child(6) { top: 75%; left: 40%; animation-delay: 1.5s; }
+        .thinking-particles .dot:nth-child(7) { top: 25%; left: 70%; animation-delay: 0.4s; }
+        .thinking-particles .dot:nth-child(8) { top: 60%; left: 75%; animation-delay: 0.8s; }
+        @keyframes particle-float {
+            0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+            50% { transform: translate(6px, -8px) scale(1.4); opacity: 1; }
+        }
+
+        /* Searching: independent floating stars (different directions) */
+        .search-stars {
+            width: 160px; height: 160px;
+            position: relative;
+        }
+        .search-stars .star {
+            position: absolute;
+            width: 3px; height: 3px;
+            background: #c7d2fe;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #a5b4fc;
+            opacity: 0.8;
+        }
+        .search-stars .star:nth-child(1) { top: 20%; left: 15%; animation: star-drift-1 2.8s ease-in-out infinite; }
+        .search-stars .star:nth-child(2) { top: 30%; left: 75%; animation: star-drift-2 3.2s ease-in-out infinite; }
+        .search-stars .star:nth-child(3) { top: 60%; left: 25%; animation: star-drift-3 2.4s ease-in-out infinite; }
+        .search-stars .star:nth-child(4) { top: 70%; left: 65%; animation: star-drift-4 3.6s ease-in-out infinite; }
+        .search-stars .star:nth-child(5) { top: 45%; left: 50%; animation: star-drift-5 2.6s ease-in-out infinite; }
+        .search-stars .star:nth-child(6) { top: 15%; left: 55%; animation: star-drift-6 3.0s ease-in-out infinite; }
+        .search-stars .star:nth-child(7) { top: 80%; left: 40%; animation: star-drift-7 2.9s ease-in-out infinite; }
+        .search-stars .star:nth-child(8) { top: 35%; left: 30%; animation: star-drift-8 3.4s ease-in-out infinite; }
+
+        @keyframes star-drift-1 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(18px, -22px); } }
+        @keyframes star-drift-2 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-20px, 16px); } }
+        @keyframes star-drift-3 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(14px, 20px); } }
+        @keyframes star-drift-4 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-16px, -18px); } }
+        @keyframes star-drift-5 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(22px, 8px); } }
+        @keyframes star-drift-6 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-12px, 24px); } }
+        @keyframes star-drift-7 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(10px, -16px); } }
+        @keyframes star-drift-8 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-18px, -10px); } }
+
+        /* Done: clean checkmark */
+        .done-mark {
+            width: 110px; height: 110px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(16, 185, 129, 0.6);
+            display: flex; align-items: center; justify-content: center;
+            animation: pop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 0 24px rgba(16, 185, 129, 0.25);
+            background: radial-gradient(circle, rgba(16,185,129,0.08), transparent 70%);
+        }
+        .done-mark svg { width: 44px; height: 44px; stroke: #34d399; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+        @keyframes pop { from { transform: scale(0.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h2>Analysis AI Console</h2>
+                <div class="session">● Session: {{ session['email'] }}</div>
+            </div>
+            <a href="/logout" class="logout">Logout</a>
+        </div>
+
+        <div class="grid">
+            <div class="stat-card"><h3>Total Inbox Volume</h3><div class="num" id="totalInbox">{{ total_inbox }}</div></div>
+            <div class="stat-card"><h3 id="statLabel">{{ stat_label }}</h3><div class="num" id="matchCount">{{ match_count }}</div></div>
+        </div>
+
+        <div class="card">
+            {% if ai_message %}
+            <div class="ai-badge"><strong>System Memory:</strong> {{ ai_message }}</div>
+            {% endif %}
+            
+            <form id="analysisForm">
+                <label for="search_term">Data Extraction Command</label>
+                <input type="text" id="search_term" name="search_term" value="{{ search_term }}" placeholder="e.g., 'Get all confirmed orders from October 4th'" required>
+                <div class="action-row">
+                    <button type="submit" id="runBtn">Run Analysis</button>
+                    <button type="button" id="exportBtn" class="secondary">Export to CSV</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card" id="resultsCard" style="display: {% if records %}block{% else %}none{% endif %};">
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Client Email (To)</th>
+                        <th>Account / Invoice</th>
+                        <th>Subject</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody">
+                    {% if records %}
+                    {% for r in records %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td><strong style="color:#60a5fa;">{{ r.client_email }}</strong></td>
+                        {% if task_type == 'client_tally' %}
+                            <td colspan="3"><span class="badge">Verified Client</span></td>
+                        {% else %}
+                            <td>{{ r.account_no }}</td>
+                            <td>{{ r.subject }}</td>
+                            <td>{{ r.date }}</td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <a href="/chat" class="fab" title="Chat with Analysis AI">✦</a>
+
+    <div class="progress-overlay" id="progressOverlay">
+        <div class="anim-box" id="animBox">
+            <div class="thinking-particles">
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+        </div>
+        <div>
+            <div class="stage-label" id="stageLabel">Thinking</div>
+            <div class="stage-sub" id="stageSub">Parsing your command...</div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('analysisForm');
+        const runBtn = document.getElementById('runBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const overlay = document.getElementById('progressOverlay');
+        const animBox = document.getElementById('animBox');
+        const stageLabel = document.getElementById('stageLabel');
+        const stageSub = document.getElementById('stageSub');
+
+        const stages = [
+            { label: 'Thinking', sub: 'Parsing your command...', html: '<div class="thinking-particles"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' },
+            { label: 'Searching', sub: 'Connecting to inbox...', html: '<div class="search-stars"><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div></div>' },
+            { label: 'Searching', sub: 'Fetching live data...', html: '<div class="search-stars"><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div><div class="star"></div></div>' },
+            { label: 'Done', sub: 'Results ready', html: '<div class="done-mark"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>' }
+        ];
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const term = document.getElementById('search_term').value.trim();
+            if (!term) return;
+
+            runBtn.disabled = true;
+            overlay.classList.add('active');
+            let stage = 0;
+            animBox.innerHTML = stages[0].html;
+            stageLabel.textContent = stages[0].label;
+            stageSub.textContent = stages[0].sub;
+
+            const advance = () => {
+                stage = Math.min(stage + 1, stages.length - 1);
+                animBox.innerHTML = stages[stage].html;
+                stageLabel.textContent = stages[stage].label;
+                stageSub.textContent = stages[stage].sub;
+            };
+
+            const timers = [setTimeout(advance, 700), setTimeout(advance, 2000)];
+
+            try {
+                await fetch('/dashboard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ search_term: term, action: 'search' })
+                });
+                timers.forEach(clearTimeout);
+                advance();
+                setTimeout(() => window.location.reload(), 800);
+            } catch (err) {
+                timers.forEach(clearTimeout);
+                overlay.classList.remove('active');
+                runBtn.disabled = false;
+                alert('Request failed. Please try again.');
+            }
+        });
+
+        exportBtn.addEventListener('click', () => {
+            const term = document.getElementById('search_term').value.trim();
+            if (!term) return;
+            const f = document.createElement('form');
+            f.method = 'POST';
+            f.action = '/dashboard';
+            f.innerHTML = `<input name="search_term" value="${term}"><input name="action" value="export">`;
+            document.body.appendChild(f);
+            f.submit();
+        });
+    </script>
+</body>
+</html>
