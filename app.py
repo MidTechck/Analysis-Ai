@@ -288,17 +288,19 @@ def process_agentic_chat(user_message, history, email_acc, password):
     chat_context = "\n".join([f"{msg['role']}: {msg['text']}" for msg in history[-8:]])
     
     router_prompt = f"""
-    Analyze the user's latest message based on chat history.
-    
-    If the user wants to pull a SINGLE dataset, output ONLY:
-    {{"action": "SEARCH", "task_type": "standard", "subject": "Exact Subject (e.g. Order confirmed)", "date_filter": "NONE"}}
-    
-    If the user wants to CROSS-REFERENCE two datasets (e.g., check who paid but didn't order), output ONLY:
-    {{"action": "COMPARE", "subject_1": "Primary subject (e.g. payment processed)", "subject_2": "Missing subject (e.g. order confirmed)"}}
-    
-    If general chat, output ONLY:
+    Analyze the user's latest message based on chat history. Output ONLY valid JSON.
+
+    If the user wants to pull/search emails, output:
+    {{"action": "SEARCH", "task_type": "standard", "subject": "exact subject phrase or empty", "date_filter": "NONE or IMAP date like SINCE 06-Oct-2026", "email_prefix": "optional comma-separated starting letters e.g. d,h,c or empty", "specific_email": "optional exact email to look up or empty"}}
+
+    If the user wants to cross-reference two datasets, output:
+    {{"action": "COMPARE", "subject_1": "...", "subject_2": "..."}}
+
+    If general chat, output:
     {{"action": "CHAT"}}
-    
+
+    Date guidance: "last week" → SINCE ~7 days ago, "last month" → SINCE ~30 days ago, specific date → SINCE that date. Use IMAP format like SINCE 06-Oct-2026. Today is 13 Oct 2026.
+
     History:
     {chat_context}
     User latest: {user_message}
@@ -314,8 +316,24 @@ def process_agentic_chat(user_message, history, email_acc, password):
     if intent.get("action") == "SEARCH":
         results = execute_imap_search(email_acc, password, intent.get('task_type', 'standard'), intent.get('subject', ''), intent.get('date_filter', 'NONE'))
         if results['success']:
-            count = results['match_count']
-            data_context = f"SYSTEM INJECTION: You just searched for '{intent.get('subject')}'. The live server confirmed exactly {count} matches."
+            records = results.get('records', [])
+            # Apply optional filters
+            prefix = intent.get('email_prefix', '').strip().lower()
+            specific = intent.get('specific_email', '').strip().lower()
+            if specific:
+                records = [r for r in records if r.get('client_email', '').lower() == specific]
+            elif prefix:
+                prefixes = [p.strip() for p in prefix.split(',') if p.strip()]
+                records = [r for r in records if any(r.get('client_email', '').lower().startswith(p) for p in prefixes)]
+            
+            count = len(records)
+            # Inject real records (limit to avoid huge prompts)
+            sample = records[:25]
+            sample_text = "\n".join([
+                f"- {r.get('client_email','?')} | {r.get('date','?')} | {r.get('subject','?')} | Acc: {r.get('account_no','Nil')}"
+                for r in sample
+            ])
+            data_context = f"SYSTEM INJECTION: Searched '{intent.get('subject') or 'all'}'. Found exactly {count} matching records after filters.\nTop records:\n{sample_text}\n(If more exist, total is {count}. Use these exact details.)"
             session['dashboard_query'] = {"task_type": intent.get('task_type', 'standard'), "subject": intent.get('subject', ''), "date_filter": intent.get('date_filter', 'NONE')}
             session.modified = True
         else:
@@ -341,10 +359,10 @@ def process_agentic_chat(user_message, history, email_acc, password):
     
     RULES:
     1. Act natural and human-like. NEVER announce your underlying AI model or provider.
-    2. If you have data from SYSTEM INJECTION, give the user the precise insights requested. 
-    3. If resolving a CROSS-REFERENCE (COMPARE), explicitly list the specific emails you found so the user can take action.
+    2. If you have data from SYSTEM INJECTION, use the exact emails, dates, and details provided. List them clearly when asked.
+    3. If the user asks about a specific email, date range, or filter (e.g. starting with d/h/c), answer only from the injected records.
     4. If it was a single search, explicitly state the dataset is loaded onto their Dashboard.
-    5. NEVER use placeholders.
+    5. NEVER use placeholders or invent data.
     
     Previous Chat:
     {chat_context}
